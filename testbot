@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Clicker — Submit to Telegram</title>
+<style>
+  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;background:linear-gradient(#e8f7ff,#dff7ea)}
+  .card{background:#fff;padding:20px;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.12);width:360px;max-width:92vw;text-align:center}
+  h1{margin:0 0 12px;font-size:20px}
+  .small{color:#666;font-size:13px;margin-bottom:10px}
+  input,button{width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;box-sizing:border-box}
+  #clickBtn{font-size:20px;margin-top:14px;background:#00aaff;color:#fff;border:0;cursor:pointer}
+  #submitBtn{margin-top:10px;background:#ffcc00;font-weight:700;cursor:pointer;border:0}
+  #leader{margin-top:12px;text-align:left;max-height:160px;overflow:auto;border-top:1px dashed #eee;padding-top:10px}
+  .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f7f7f7}
+  .muted{color:#999;font-size:12px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Clicker — Submit Score (announces to Telegram)</h1>
+    <div class="small">Enter a name (max 16 chars) — then click the button to score. When you Submit, the server announces the result to Telegram.</div>
+
+    <input id="nameInput" maxlength="16" placeholder="Player name" autocomplete="name" />
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button id="clickBtn">Click me</button>
+      <button id="resetBtn" style="width:96px;background:#eee;border:1px solid #ddd">Reset</button>
+    </div>
+
+    <div style="margin-top:12px;font-size:28px;font-weight:700" id="scoreDisplay">0</div>
+
+    <button id="submitBtn">Submit Score & Announce</button>
+    <div class="muted" style="margin-top:8px">Note: Client token is public — server verifies it and sends Telegram message.</div>
+
+    <div id="leader">
+      <div class="muted">Leaderboard (from server)</div>
+      <div id="leaderContent">Loading...</div>
+    </div>
+  </div>
+
+<script>
+/* ====== CONFIG: update these ====== */
+const PYAW_URL = 'https://ezezeez.pythonanywhere.com/submit-score'; // <--- change to your PythonAnywhere URL
+const CLIENT_TOKEN = 'public-client-token-123'; // <--- set same value in server env
+/* ================================== */
+
+const nameInput = document.getElementById('nameInput');
+const clickBtn = document.getElementById('clickBtn');
+const resetBtn = document.getElementById('resetBtn');
+const submitBtn = document.getElementById('submitBtn');
+const scoreDisplay = document.getElementById('scoreDisplay');
+const leaderContent = document.getElementById('leaderContent');
+
+let score = 0;
+function updateScore(){ scoreDisplay.textContent = score; }
+
+clickBtn.addEventListener('click', () => { score++; updateScore(); });
+resetBtn.addEventListener('click', () => { score = 0; updateScore(); });
+
+async function fetchLeaderboard(){
+  leaderContent.textContent = 'Loading...';
+  try {
+    const res = await fetch(PYAW_URL, {method:'GET', mode:'cors'});
+    if (!res.ok) throw new Error('server error');
+    const data = await res.json(); // expects [{name,score},...]
+    if (!Array.isArray(data)) throw new Error('bad data');
+    if (data.length === 0) leaderContent.innerHTML = '<div class="muted">No scores yet</div>';
+    else leaderContent.innerHTML = data.slice(0,20).map((r,i)=> `<div class="row"><div>${i+1}. ${escapeHtml(r.name)}</div><div>${Number(r.score)||0}</div></div>`).join('');
+  } catch(e){
+    leaderContent.innerHTML = '<div class="muted">Failed to load leaderboard</div>';
+    console.warn(e);
+  }
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+submitBtn.addEventListener('click', async () => {
+  let name = String(nameInput.value || '').trim().slice(0,16);
+  if (!name) name = 'Player';
+  const payload = { name, score: Number(score) || 0 };
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Submitting...';
+
+  try {
+    const res = await fetch(PYAW_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Client-Token': CLIENT_TOKEN
+      },
+      body: JSON.stringify(payload),
+      mode: 'cors'
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(()=>res.statusText);
+      alert('Submit failed: ' + res.status + ' ' + text);
+    } else {
+      const j = await res.json().catch(()=>({}));
+      // show friendly info to user
+      if (j && j.telegram && j.telegram === 'sent') {
+        alert(`Score submitted! Announcement sent to Telegram.`);
+      } else if (j && j.telegram === 'failed') {
+        alert('Score saved but Telegram announcement failed (check server).');
+      } else {
+        alert('Score submitted!');
+      }
+      // update leaderboard view
+      await fetchLeaderboard();
+    }
+  } catch (e) {
+    console.error(e);
+    alert('Network error while submitting score.');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Submit Score & Announce';
+  }
+});
+
+// initial bootstrap
+updateScore();
+fetchLeaderboard();
+</script>
+</body>
+</html>
